@@ -13,11 +13,11 @@ Interactive multiple-choice practice for **IE404 Management for Engineers (METU)
 5. Crisis and Conflict Management and Negotiation (+ Conflict Analysis Tools)
 
 ## Modes
-- **Section practice** â€” random order, instant feedback with explanation and source page.
-- **Full exam** â€” 50 / 100 / 500 questions drawn across sections, optional timer, answers at the end.
-- **My mistakes** â€” re-practice questions you last answered wrong (progress is stored in your browser only).
+- **Section practice** — random order, instant feedback with explanation and source page.
+- **Full exam** — 50 / 100 / 500 questions drawn across sections, optional timer, answers at the end.
+- **My mistakes** — re-practice questions you last answered wrong (progress is stored in your browser only).
 
-Keyboard: `1â€“4` or `Aâ€“D` to answer, `Enter` next, `â†` previous (exam).
+Keyboard: `1–4` or `A–D` to answer, `Enter` next, `←` previous (exam).
 
 ## Editing questions
 Questions live in `bank/s*.py`. After editing:
