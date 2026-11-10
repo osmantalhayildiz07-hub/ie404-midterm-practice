@@ -8,18 +8,18 @@
 :root {
   --bg: #f6f7f9; --surface: #ffffff; --text: #1d2330; --muted: #5d6677; --border: #dde1e8;
   --accent: #2f5bd3; --accent-soft: #e8eefc; --ok: #1f8a4c; --ok-soft: #e3f4ea; --bad: #c33b3b; --bad-soft: #fbe7e7;
-  --radius: 12px; --shadow: 0 1px 2px rgba(20,30,50,.06), 0 2px 8px rgba(20,30,50,.04);
+  --reading: #8a4fbf; --reading-soft: #f2eafa; --radius: 12px; --shadow: 0 1px 2px rgba(20,30,50,.06), 0 2px 8px rgba(20,30,50,.04);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #12151b; --surface: #1b2029; --text: #e7eaf0; --muted: #9aa3b4; --border: #2c3340;
-    --accent: #7c9cf5; --accent-soft: #233154; --ok: #4cc283; --ok-soft: #173326; --bad: #ef7676; --bad-soft: #3a1d1f;
+    --accent: #7c9cf5; --accent-soft: #233154; --reading: #c49cf0; --reading-soft: #33244a; --ok: #4cc283; --ok-soft: #173326; --bad: #ef7676; --bad-soft: #3a1d1f;
     --shadow: none;
   }
 }
 :root[data-theme="dark"] {
   --bg: #12151b; --surface: #1b2029; --text: #e7eaf0; --muted: #9aa3b4; --border: #2c3340;
-  --accent: #7c9cf5; --accent-soft: #233154; --ok: #4cc283; --ok-soft: #173326; --bad: #ef7676; --bad-soft: #3a1d1f;
+  --accent: #7c9cf5; --accent-soft: #233154; --reading: #c49cf0; --reading-soft: #33244a; --ok: #4cc283; --ok-soft: #173326; --bad: #ef7676; --bad-soft: #3a1d1f;
   --shadow: none;
 }
 * { box-sizing: border-box; }
@@ -42,6 +42,11 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 button.link { border: none; background: none; color: var(--muted); padding: 4px 6px; text-decoration: underline; }
 .sec-card { text-align: left; display: flex; flex-direction: column; gap: 8px; padding: 16px; min-height: 132px; }
 .sec-card .num { font-size: .75rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: .06em; }
+.sec-card.reading .num { color: var(--reading); }
+.sec-card.reading .bar > span { background: var(--reading); }
+.pill.reading { background: var(--reading-soft); color: var(--reading); }
+.group-head { margin-bottom: 10px; }
+.group.reading { border-top: 1px solid var(--border); padding-top: 16px; }
 .sec-card .name { font-weight: 600; line-height: 1.3; }
 .bar { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
 .bar > span { display: block; height: 100%; background: var(--accent); }
@@ -103,7 +108,10 @@ td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-n
 <div class="wrap" id="app"></div>
 <script>
 const QUESTIONS = /*__QUESTIONS__*/[];
-const SECTIONS = [...new Set(QUESTIONS.map(q => q.section))];
+/* Documents (lecture decks and readings) in display order: lectures first, then readings, by week. */
+const DOCS = [];
+QUESTIONS.forEach(q => { if (!DOCS.some(d => d.doc === q.doc)) DOCS.push({ doc: q.doc, type: q.type, week: q.week, topic: q.topic }); });
+DOCS.sort((a, b) => (a.type === b.type ? 0 : a.type === "lecture" ? -1 : 1) || a.week - b.week);
 const STORE_KEY = "ie404-midterm-progress-v1";
 const LETTERS = ["A", "B", "C", "D"];
 
@@ -132,13 +140,16 @@ function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { co
 function pct(n, d) { return d ? Math.round(100 * n / d) : 0; }
 function fmtTime(sec) { sec = Math.max(0, Math.round(sec)); const m = Math.floor(sec / 60), s = sec % 60; return `${m}:${String(s).padStart(2, "0")}`; }
 const byId = Object.fromEntries(QUESTIONS.map(q => [q.id, q]));
-const sectionIndex = name => SECTIONS.indexOf(name) + 1;
+const TYPE_LABEL = { lecture: "Lecture slides", reading: "Reading" };
+const qLabel = q => `${q.type === "lecture" ? "Lecture" : "Reading"} · W${q.week} · ${q.doc}`;
+const docsOf = type => DOCS.filter(d => d.type === type);
+const poolOf = scope => scope === "all" ? QUESTIONS : QUESTIONS.filter(q => q.type === scope);
 
-/* Weighted draw: each section contributes in proportion to its share of the bank (largest-remainder). */
-function drawExam(n) {
-  if (n >= QUESTIONS.length) return shuffle(QUESTIONS);
-  const groups = SECTIONS.map(s => QUESTIONS.filter(q => q.section === s));
-  const exact = groups.map(g => n * g.length / QUESTIONS.length);
+/* Weighted draw: each document contributes in proportion to its share of the pool (largest-remainder). */
+function drawExam(n, pool) {
+  if (n >= pool.length) return shuffle(pool);
+  const groups = DOCS.map(d => pool.filter(q => q.doc === d.doc)).filter(g => g.length);
+  const exact = groups.map(g => n * g.length / pool.length);
   const take = exact.map(Math.floor);
   let left = n - take.reduce((a, b) => a + b, 0);
   exact.map((x, i) => [x - Math.floor(x), i]).sort((a, b) => b[0] - a[0]).slice(0, left).forEach(([, i]) => take[i]++);
@@ -147,7 +158,7 @@ function drawExam(n) {
 
 /* ---------- state ---------- */
 let session = null;     // active quiz
-let examCfg = { count: 50, timer: false, minutes: 60 };
+let examCfg = { scope: "all", count: 50, timer: false, minutes: 60 };
 let timerHandle = null;
 
 function stopTimer() { if (timerHandle) { clearInterval(timerHandle); timerHandle = null; } }
@@ -168,46 +179,66 @@ function startSession(opts) {
 }
 
 /* ---------- home ---------- */
+function statLine(qs) {
+  const st = qs.map(q => progress.stats[q.id]).filter(Boolean);
+  const a = st.reduce((x, y) => x + y.a, 0), c = st.reduce((x, y) => x + y.c, 0);
+  return { seen: st.length, text: `${st.length}/${qs.length} seen${a ? ` · ${pct(c, a)}% correct` : ""}` };
+}
+function docCard(d) {
+  const qs = QUESTIONS.filter(q => q.doc === d.doc);
+  const s = statLine(qs);
+  return `<button class="card sec-card ${d.type}" data-doc="${DOCS.indexOf(d)}">
+      <span class="num">Week ${d.week} · ${qs.length} questions</span>
+      <span class="name">${esc(d.doc)}</span>
+      <span class="small muted">${s.text}</span>
+      <span class="bar"><span style="width:${pct(s.seen, qs.length)}%"></span></span>
+    </button>`;
+}
+function groupBlock(type, intro) {
+  const pool = poolOf(type);
+  return `<section class="group ${type}">
+      <div class="row spread group-head">
+        <div><h2 style="margin:0">${TYPE_LABEL[type] === "Reading" ? "Readings" : TYPE_LABEL[type]}</h2>
+          <div class="small muted">${intro} · ${pool.length} questions · ${statLine(pool).text}</div></div>
+        <button data-all="${type}">Practice all ${pool.length}</button>
+      </div>
+      <div class="grid">${docsOf(type).map(docCard).join("")}</div>
+    </section>`;
+}
 function renderHome() {
   stopTimer(); session = null;
-  const seen = Object.keys(progress.stats).length;
-  const totalA = Object.values(progress.stats).reduce((a, s) => a + s.a, 0);
-  const totalC = Object.values(progress.stats).reduce((a, s) => a + s.c, 0);
-  const wrong = wrongIds().length;
-  const cards = SECTIONS.map((s, i) => {
-    const qs = QUESTIONS.filter(q => q.section === s);
-    const st = qs.map(q => progress.stats[q.id]).filter(Boolean);
-    const a = st.reduce((x, y) => x + y.a, 0), c = st.reduce((x, y) => x + y.c, 0);
-    return `<button class="card sec-card" data-sec="${i}">
-      <span class="num">Section ${i + 1} · ${qs.length} questions</span>
-      <span class="name">${esc(s)}</span>
-      <span class="small muted">${st.length}/${qs.length} seen${a ? ` · ${pct(c, a)}% correct` : ""}</span>
-      <span class="bar"><span style="width:${pct(st.length, qs.length)}%"></span></span>
-    </button>`;
-  }).join("");
+  const seen = Object.keys(progress.stats).filter(id => byId[id]).length;
+  const wrong = wrongIds().filter(id => byId[id]).length;
+  const pool = poolOf(examCfg.scope);
+  const counts = [50, 100].filter(n => n < pool.length).concat([pool.length]);
+  if (!counts.includes(examCfg.count)) examCfg.count = counts[0];
   $("#app").innerHTML = `
     <header class="top">
-      <div><h1>IE404 Midterm Practice</h1><div class="muted small">Management for Engineers · ${QUESTIONS.length} questions from lecture notes and readings</div></div>
-      <div class="small muted">${seen}/${QUESTIONS.length} seen${totalA ? ` · ${pct(totalC, totalA)}% correct overall` : ""}</div>
+      <div><h1>IE404 Midterm Practice</h1><div class="muted small">Management for Engineers · ${QUESTIONS.length} questions · lecture slides and reading assignments kept separate</div></div>
+      <div class="small muted">${seen}/${QUESTIONS.length} seen</div>
     </header>
     <div class="stack">
-      <section>
-        <h2>Practice by section</h2>
-        <div class="grid">${cards}</div>
-        <div class="small muted" style="margin-top:8px">Questions come in random order; you see the answer and explanation right after each one.</div>
-      </section>
+      ${groupBlock("lecture", "Questions from the instructor's slides")}
+      ${groupBlock("reading", "Questions from the weekly reading assignments")}
+      <div class="small muted">Practice mode: random order, answer and explanation right after each question.</div>
       <section class="card stack">
         <h2>Full exam</h2>
-        <div class="small muted">Random questions drawn across all sections in proportion to each section's weight. Answers are shown at the end.</div>
+        <div class="small muted">Random questions drawn in proportion to each document's share. Answers are shown at the end.</div>
         <div class="row">
-          <span class="small muted">Questions</span>
+          <span class="small muted" style="min-width:74px">Content</span>
+          <div class="seg" role="group" aria-label="Exam content">
+            ${[["all", "Slides + readings"], ["lecture", "Slides only"], ["reading", "Readings only"]].map(([k, l]) => `<button data-scope="${k}" aria-pressed="${examCfg.scope === k}">${l}</button>`).join("")}
+          </div>
+        </div>
+        <div class="row">
+          <span class="small muted" style="min-width:74px">Questions</span>
           <div class="seg" role="group" aria-label="Number of questions">
-            ${[50, 100, QUESTIONS.length].map(n => `<button data-count="${n}" aria-pressed="${examCfg.count === n}">${n === QUESTIONS.length ? `All ${n}` : n}</button>`).join("")}
+            ${counts.map(n => `<button data-count="${n}" aria-pressed="${examCfg.count === n}">${n === pool.length ? `All ${n}` : n}</button>`).join("")}
           </div>
         </div>
         <div class="row">
           <label class="check"><input type="checkbox" id="useTimer" ${examCfg.timer ? "checked" : ""}> Timer</label>
-          <input type="number" id="minutes" min="1" max="600" value="${examCfg.minutes}" ${examCfg.timer ? "" : "disabled"} aria-label="Minutes"> <span class="small muted">minutes</span>
+          <input type="number" id="minutes" min="1" max="900" value="${examCfg.minutes}" ${examCfg.timer ? "" : "disabled"} aria-label="Minutes"> <span class="small muted">minutes</span>
         </div>
         <div><button class="primary" id="startExam">Start exam</button></div>
       </section>
@@ -220,19 +251,29 @@ function renderHome() {
         <button class="link" id="reset">Reset progress</button>
       </div>
     </div>`;
-  document.querySelectorAll("[data-sec]").forEach(b => b.onclick = () => {
-    const s = SECTIONS[+b.dataset.sec];
-    startSession({ mode: "practice", title: s, items: shuffle(QUESTIONS.filter(q => q.section === s)) });
+  document.querySelectorAll("[data-doc]").forEach(b => b.onclick = () => {
+    const d = DOCS[+b.dataset.doc];
+    startSession({ mode: "practice", title: `${TYPE_LABEL[d.type]} · ${d.doc}`, items: shuffle(QUESTIONS.filter(q => q.doc === d.doc)) });
   });
-  document.querySelectorAll("[data-count]").forEach(b => b.onclick = () => {
-    examCfg.count = +b.dataset.count;
-    examCfg.minutes = Math.round(examCfg.count * 1.2);
-    renderHome();
+  document.querySelectorAll("[data-all]").forEach(b => b.onclick = () => {
+    const t = b.dataset.all;
+    startSession({ mode: "practice", title: t === "lecture" ? "All lecture-slide questions" : "All reading questions", items: shuffle(poolOf(t)) });
   });
+  const setMinutes = () => { examCfg.minutes = Math.max(1, Math.round(examCfg.count * 1.2)); };
+  document.querySelectorAll("[data-scope]").forEach(b => b.onclick = () => {
+    examCfg.scope = b.dataset.scope;
+    const p = poolOf(examCfg.scope).length;
+    if (examCfg.count > p) examCfg.count = p;
+    setMinutes(); renderHome();
+  });
+  document.querySelectorAll("[data-count]").forEach(b => b.onclick = () => { examCfg.count = +b.dataset.count; setMinutes(); renderHome(); });
   $("#useTimer").onchange = e => { examCfg.timer = e.target.checked; $("#minutes").disabled = !examCfg.timer; };
-  $("#minutes").onchange = e => { examCfg.minutes = Math.max(1, Math.min(600, +e.target.value || 1)); e.target.value = examCfg.minutes; };
-  $("#startExam").onclick = () => startSession({ mode: "exam", title: `Full exam · ${examCfg.count} questions`,
-    items: drawExam(examCfg.count), limit: examCfg.timer ? examCfg.minutes * 60 : null });
+  $("#minutes").onchange = e => { examCfg.minutes = Math.max(1, Math.min(900, +e.target.value || 1)); e.target.value = examCfg.minutes; };
+  $("#startExam").onclick = () => {
+    const scopeName = { all: "slides + readings", lecture: "slides only", reading: "readings only" }[examCfg.scope];
+    startSession({ mode: "exam", title: `Full exam · ${examCfg.count} questions · ${scopeName}`,
+      items: drawExam(examCfg.count, poolOf(examCfg.scope)), limit: examCfg.timer ? examCfg.minutes * 60 : null });
+  };
   $("#startWrong").onclick = () => startSession({ mode: "practice", title: "My mistakes",
     items: shuffle(wrongIds().map(id => byId[id]).filter(Boolean)) });
   $("#reset").onclick = () => { if (confirm("Reset all saved progress and mistakes?")) { progress = { stats: {} }; saveProgress(); renderHome(); } };
@@ -277,7 +318,7 @@ function renderQuiz() {
     </header>
     <div class="bar" style="margin-bottom:14px"><span style="width:${pct(s.mode === "exam" ? doneCount : s.idx + (answered ? 1 : 0), n)}%"></span></div>
     <article class="card">
-      <div class="qhead"><span class="pill">S${sectionIndex(q.section)} · ${esc(q.section)}</span><span class="small muted">${q.id}</span></div>
+      <div class="qhead"><span class="pill ${q.type}">${esc(qLabel(q))}</span><span class="small muted">${q.id}</span></div>
       <div class="question">${esc(q.question)}</div>
       <div class="opts">${opts}</div>
       ${feedback}
@@ -334,16 +375,16 @@ function finishSession(timedOut) {
   const pool = s.mode === "exam" ? s.items : s.items.filter(q => s.answers[q.id] !== undefined);
   const correct = pool.filter(q => s.answers[q.id] === q.answer_index);
   const missed = pool.filter(q => s.answers[q.id] !== q.answer_index);
-  const rows = SECTIONS.map(sec => {
-    const p = pool.filter(q => q.section === sec); if (!p.length) return "";
+  const rows = DOCS.map(d => {
+    const p = pool.filter(q => q.doc === d.doc); if (!p.length) return "";
     const c = p.filter(q => s.answers[q.id] === q.answer_index).length;
-    return `<tr><td>S${sectionIndex(sec)} · ${esc(sec)}</td><td class="num">${c}/${p.length}</td>
+    return `<tr><td>${d.type === "lecture" ? "Lecture" : "Reading"} · W${d.week} · ${esc(d.doc)}</td><td class="num">${c}/${p.length}</td>
       <td style="width:30%"><div class="bar ok"><span style="width:${pct(c, p.length)}%"></span></div></td><td class="num">${pct(c, p.length)}%</td></tr>`;
   }).join("");
   const review = missed.map((q, k) => {
     const ch = s.answers[q.id];
     return `<div class="review-item">
-      <div class="small muted">${k + 1}. ${q.id} · S${sectionIndex(q.section)} ${esc(q.section)}</div>
+      <div class="small muted">${k + 1}. ${q.id} · ${esc(qLabel(q))}</div>
       <div style="font-weight:600;margin:4px 0 6px">${esc(q.question)}</div>
       <div class="ans bad">Your answer: ${ch === undefined ? "— (not answered)" : `${LETTERS[ch]}. ${esc(q.options[ch])}`}</div>
       <div class="ans ok">Correct: ${LETTERS[q.answer_index]}. ${esc(q.options[q.answer_index])}</div>
@@ -363,7 +404,7 @@ function finishSession(timedOut) {
           <button id="home2">Back to home</button>
         </div>
       </section>
-      ${pool.length ? `<section class="card"><h2>By section</h2><table><thead><tr><th>Section</th><th class="num">Score</th><th></th><th class="num">%</th></tr></thead><tbody>${rows}</tbody></table></section>` : ""}
+      ${pool.length ? `<section class="card"><h2>By document</h2><table><thead><tr><th>Document</th><th class="num">Score</th><th></th><th class="num">%</th></tr></thead><tbody>${rows}</tbody></table></section>` : ""}
       <section class="card stack"><h2>${missed.length ? `Review: ${missed.length} missed question${missed.length > 1 ? "s" : ""}` : pool.length ? "No mistakes — well done." : "No questions answered."}</h2>${review}</section>
     </div>`;
   $("#home").onclick = renderHome; $("#home2").onclick = renderHome;
